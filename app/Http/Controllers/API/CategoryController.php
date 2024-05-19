@@ -3,8 +3,12 @@
 namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\CategoryRequest;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use App\Models\Category;
+use App\Jobs\DeleteUnusedTags;
+
 
 class CategoryController extends Controller
 {
@@ -12,64 +16,75 @@ class CategoryController extends Controller
     {
         $query = Category::query();
 
-        // Filter by startTime and endTime 
+        if ($request->has('query')) {
+            $query->where('title', 'like', '%' . $request->input('query') . '%');
+        }
+
         if ($request->has('startTime') && $request->has('endTime')) {
-            $query->whereBetween('created_at', [$request->input('startTime'), $request->input('endTime')]);
+            $query->whereBetween('createdAt', [$request->input('startTime'), $request->input('endTime')]);
         }
 
-        // Sort by created_at 
         if ($request->has('sortBy') && $request->input('sortBy') === 'created_at') {
-            $query->orderBy('created_at', 'desc');
+            $query->orderBy('createdAt', 'desc');
         }
 
-        // Paginate 
         $categories = $query->paginate(10);
 
         return response()->json($categories);
     }
 
-    public function store(Request $request)
+    public function store(CategoryRequest $request)
     {
-        // Validate 
-        $validatedData = $request->validate([
-            'name' => 'required|string|max:255',
-            'description' => 'nullable|string',
-        ]);
+        $data = $request->validated();
 
-        // Create 
-        $category = Category::create($validatedData);
+        if (empty($data['slug'])) {
+            $data['slug'] = Str::slug($data['title']);
+        }
 
+        if (empty($data['metaTitle'])) {
+            $data['metaTitle'] = $data['title'];
+        }
+
+        $category = Category::create($data);
         return response()->json($category, 201);
     }
 
-    public function show($id)
+    public function update(CategoryRequest $request, $id)
     {
         $category = Category::findOrFail($id);
+        $data = $request->validated();
+
+        if (empty($data['slug'])) {
+            $data['slug'] = Str::slug($data['title']);
+        }
+
+        if (empty($data['metaTitle'])) {
+            $data['metaTitle'] = $data['title'];
+        }
+
+        $category->update($data);
+        return response()->json($category);
+    }
+    public function show($id)
+    {
+        $category = Category::with('posts')->findOrFail($id); // Assuming category has a relationship with posts
         return response()->json($category);
     }
 
 
-    public function update(Request $request, $id)
-    {
-        // Validate 
-        $validatedData = $request->validate([
-            'name' => 'string|max:255',
-            'description' => 'string',
-        ]);
-
-        $category = Category::findOrFail($id);
-
-        // Update 
-        $category->update($validatedData);
-
-        return response()->json($category, 200);
-    }
-
 
     public function destroy($id)
     {
+        // $category = Category::findOrFail($id);
+        // $category->delete();
+
+        // return response()->json(null, 204);
+
         $category = Category::findOrFail($id);
         $category->delete();
+
+        DeleteUnusedTags::dispatch();
+
         return response()->json(null, 204);
     }
 }
